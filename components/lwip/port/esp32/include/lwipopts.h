@@ -812,26 +812,17 @@
 #define LWIP_DHCP_MAX_NTP_SERVERS       CONFIG_LWIP_DHCP_MAX_NTP_SERVERS
 #define LWIP_TIMEVAL_PRIVATE            0
 
-/*
-   --------------------------------------
-   ------------ SNTP options ------------
-   --------------------------------------
-*/
-/*
- * SNTP update delay - in milliseconds
- */
-/** Set this to 1 to support DNS names (or IP address strings) to set sntp servers
- * One server address/name can be defined as default if SNTP_SERVER_DNS == 1:
- * \#define SNTP_SERVER_ADDRESS "pool.ntp.org"
- */
-#define SNTP_SERVER_DNS            1
+extern void mach_rtc_synced (void);
+extern uint32_t sntp_update_period;
 
-#define SNTP_UPDATE_DELAY              CONFIG_LWIP_SNTP_UPDATE_DELAY
+#define SNTP_SUPPRESS_DELAY_CHECK
+#define SNTP_UPDATE_DELAY               sntp_update_period
 
 #define SNTP_SET_SYSTEM_TIME_US(sec, us)  \
     do { \
         struct timeval tv = { .tv_sec = sec, .tv_usec = us }; \
-        sntp_sync_time(&tv); \
+        settimeofday(&tv, NULL); \
+        mach_rtc_synced(); \
     } while (0);
 
 #define SNTP_GET_SYSTEM_TIME(sec, us) \
@@ -840,7 +831,6 @@
         gettimeofday(&tv, NULL); \
         (sec) = tv.tv_sec;  \
         (us) = tv.tv_usec; \
-        sntp_set_sync_status(SNTP_SYNC_STATUS_RESET); \
     } while (0);
 
 #define SOC_SEND_LOG //printf
