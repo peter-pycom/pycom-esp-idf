@@ -17,10 +17,13 @@
 #include "esp_log.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
+#include "esp_eth.h"
+
 
 #define DEFAULT_SCAN_LIST_SIZE CONFIG_EXAMPLE_SCAN_LIST_SIZE
 
 static const char *TAG = "scan";
+xQueueHandle eth_cmdQueue = NULL;
 
 static void print_auth_mode(int authmode)
 {
@@ -156,3 +159,7 @@ void app_main(void)
 void vPortCleanUpTCB (void *tcb) {
 
 }
+
+eth_speed_t get_eth_link_speed(void){return 0;}
+bool is_eth_link_up(void){return false;}
+void modeth_get_mac(uint8_t *mac){};

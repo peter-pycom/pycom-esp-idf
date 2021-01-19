@@ -53,9 +53,55 @@
 #include "esp_netif_net_stack.h"
 #include "esp_compiler.h"
 
+typedef enum
+{
+    ETH_CMD_TX = 0,
+    ETH_CMD_CHK_LINK
+}modeth_cmd_t;
+
+typedef struct
+{
+    modeth_cmd_t cmd;
+    uint8_t* buf;
+    uint16_t len;
+}modeth_cmd_ctx_t;
+
+eth_speed_t get_eth_link_speed(void);
+extern bool is_eth_link_up(void);
+extern xQueueHandle eth_cmdQueue;
+
 /* Define those to better describe your network interface. */
 #define IFNAME0 'e'
 #define IFNAME1 'n'
+
+static esp_err_t ksz8851_tx(struct pbuf *buff)
+{
+    printf("%s\n", __func__);
+    modeth_cmd_ctx_t ctx =
+    {
+            .cmd = ETH_CMD_TX,
+            .buf = (uint8_t*)(buff->payload),
+            .len = buff->len
+    };
+
+    xQueueSend(eth_cmdQueue, &ctx, 10 / portTICK_PERIOD_MS);
+
+    return ESP_OK;
+}
+
+static err_t etharp_wrapper(struct netif *netif, struct pbuf *q, const ip4_addr_t *ipaddr)
+{
+    printf("%s\n", __func__);
+    if(is_eth_link_up())
+    {
+        return etharp_output(netif, q, ipaddr);
+    }
+    else
+    {
+        return ERR_IF;
+    }
+}
+
 
 /**
  * @brief Free resources allocated in L2 layer
@@ -65,6 +111,7 @@
  */
 static void ethernet_free_rx_buf_l2(struct netif *netif, void *buf)
 {
+    printf("%s\n", __func__);
     free(buf);
 }
 
@@ -76,6 +123,7 @@ static void ethernet_free_rx_buf_l2(struct netif *netif, void *buf)
  */
 static void ethernet_low_level_init(struct netif *netif)
 {
+    printf("%s\n", __func__);
     /* set MAC hardware address length */
     netif->hwaddr_len = ETHARP_HWADDR_LEN;
 
@@ -106,6 +154,7 @@ static void ethernet_low_level_init(struct netif *netif)
  */
 static err_t ethernet_low_level_output(struct netif *netif, struct pbuf *p)
 {
+    printf("%s\n", __func__);
     struct pbuf *q = p;
     esp_netif_t *esp_netif = esp_netif_get_handle_from_netif_impl(netif);
     esp_err_t ret = ESP_FAIL;
@@ -115,7 +164,9 @@ static err_t ethernet_low_level_output(struct netif *netif, struct pbuf *p)
     }
 
     if (q->next == NULL) {
-        ret = esp_netif_transmit(esp_netif, q->payload, q->len);
+        printf("%s buf\n", __func__);
+        // ret = esp_netif_transmit(esp_netif, q->payload, q->len);
+        ret = ksz8851_tx(q);
     } else {
         LWIP_DEBUGF(PBUF_DEBUG, ("low_level_output: pbuf is a list, application may has bug"));
         q = pbuf_alloc(PBUF_RAW_TX, p->tot_len, PBUF_RAM);
@@ -129,7 +180,9 @@ static err_t ethernet_low_level_output(struct netif *netif, struct pbuf *p)
         } else {
             return ERR_MEM;
         }
-        ret = esp_netif_transmit(esp_netif, q->payload, q->len);
+        printf("%s list\n", __func__);
+        // ret = esp_netif_transmit(esp_netif, q->payload, q->len);
+        ret = ksz8851_tx(q);
         /* content in payload has been copied to DMA buffer, it's safe to free pbuf now */
         pbuf_free(q);
     }
@@ -154,12 +207,13 @@ static err_t ethernet_low_level_output(struct netif *netif, struct pbuf *p)
  */
 void ethernetif_input(void *h, void *buffer, size_t len, void *eb)
 {
+    printf("%s\n", __func__);
     struct netif *netif = h;
     struct pbuf *p;
 
     if (unlikely(buffer == NULL || !netif_is_up(netif))) {
         if (buffer) {
-            ethernet_free_rx_buf_l2(netif, buffer);
+            // ethernet_free_rx_buf_l2(netif, buffer);
         }
         return;
     }
@@ -167,7 +221,7 @@ void ethernetif_input(void *h, void *buffer, size_t len, void *eb)
     /* acquire new pbuf, type: PBUF_REF */
     p = pbuf_alloc(PBUF_RAW, len, PBUF_REF);
     if (p == NULL) {
-        ethernet_free_rx_buf_l2(netif, buffer);
+        // ethernet_free_rx_buf_l2(netif, buffer);
         return;
     }
     p->payload = buffer;
@@ -194,6 +248,7 @@ void ethernetif_input(void *h, void *buffer, size_t len, void *eb)
  */
 err_t ethernetif_init(struct netif *netif)
 {
+    printf("%s\n", __func__);
     LWIP_ASSERT("netif != NULL", (netif != NULL));
     /* Have to get the esp-netif handle from netif first and then driver==ethernet handle from there */
     esp_eth_handle_t eth_handle = esp_netif_get_io_driver(esp_netif_get_handle_from_netif_impl(netif));
@@ -212,19 +267,23 @@ err_t ethernetif_init(struct netif *netif)
 
     esp_eth_ioctl(eth_handle, ETH_CMD_G_SPEED, &speed);
     if (speed == ETH_SPEED_100M) {
+        printf("lwip 100m\n");
         NETIF_INIT_SNMP(netif, snmp_ifType_ethernet_csmacd, 100000000);
     } else {
+        printf("lwip 10m\n");
         NETIF_INIT_SNMP(netif, snmp_ifType_ethernet_csmacd, 10000000);
     }
 
     netif->name[0] = IFNAME0;
     netif->name[1] = IFNAME1;
-    netif->output = etharp_output;
+    //netif->output = etharp_output;
+    netif->output = etharp_wrapper;
 #if LWIP_IPV6
+    printf("lwip ipv6\n");
     netif->output_ip6 = ethip6_output;
 #endif /* LWIP_IPV6 */
     netif->linkoutput = ethernet_low_level_output;
-    netif->l2_buffer_free_notify = ethernet_free_rx_buf_l2;
+    // netif->l2_buffer_free_notify = ethernet_free_rx_buf_l2;
 
     ethernet_low_level_init(netif);
 
